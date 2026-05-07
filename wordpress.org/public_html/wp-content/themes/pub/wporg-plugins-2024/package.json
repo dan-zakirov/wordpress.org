@@ -10,7 +10,6 @@
     "watch:js": "wp-scripts start",
     "watch": "concurrently \"npm run watch:js\" \"npm run watch:css\"",
     "build:css": "grunt build",
-    "build:old:js": "wp-scripts build client/theme.js --webpack-src-dir=client --output-path=js/build",
     "build:js": "wp-scripts build",
     "build": "npm run build:css && npm run build:js",
     "format:js": "wp-scripts format client",
