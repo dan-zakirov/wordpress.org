@@ -77,9 +77,9 @@
 
 		/*
 		 * Some screenshots end up "loaded" by the browser but with zero
-		 * natural dimensions — typically Photon returning an empty 200,
-		 * or a partial / pending response that the network stack never
-		 * settles. The load / error events don't always fire for those,
+		 * natural dimensions, usually after a zero-byte or partial response
+		 * that the network stack never settles. The load / error events
+		 * don't always fire for those,
 		 * so re-sweep after a short delay and hide anything that's still
 		 * degenerate. The `markBroken` guard against `!complete` keeps
 		 * lazy figures past the fold safe from this sweep.

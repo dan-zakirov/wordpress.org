@@ -181,34 +181,6 @@ class Screenshots {
 	}
 
 	/**
-	 * Adds preconnect / dns-prefetch hints to the Photon CDN host on
-	 * single-plugin pages so the browser can warm up the TLS handshake
-	 * while the page HTML is still streaming. Saves ~50–150 ms on the
-	 * first thumbnail paint for cold visitors. Hooked from
-	 * `class-plugin-directory.php` via the `wp_resource_hints` filter.
-	 *
-	 * @param array  $urls          Resource hint URLs already queued for $relation_type.
-	 * @param string $relation_type One of preconnect / dns-prefetch / prerender / prefetch.
-	 * @return array
-	 */
-	public static function add_resource_hints( $urls, $relation_type ) {
-		if ( ! is_singular( 'plugin' ) ) {
-			return $urls;
-		}
-
-		if ( 'preconnect' === $relation_type ) {
-			$urls[] = array(
-				'href'        => 'https://i0.wp.com',
-				'crossorigin' => 'anonymous',
-			);
-		} elseif ( 'dns-prefetch' === $relation_type ) {
-			$urls[] = 'https://i0.wp.com';
-		}
-
-		return $urls;
-	}
-
-	/**
 	 * Enqueues the shortcode's own CSS and toggle script. Assets live
 	 * under the plugin's `css/` and `js/` directories alongside the
 	 * other Plugin Directory stylesheets and scripts.
@@ -363,14 +335,12 @@ class Screenshots {
 			)
 		);
 
-		$srcset = self::photon_srcset( $src );
-		$class  = 'wp-block-image size-large';
+		$class = 'wp-block-image size-large';
 
 		// Record the full-resolution source and intrinsic dimensions for the
-		// lightbox-state repair in fix_lightbox_metadata(). The grid thumbnail
-		// loads a Photon-shrunk srcset candidate, so core (which has no real
-		// attachment to query) would otherwise enlarge that small image; this
-		// hands the lightbox the lossless original at its true size.
+		// lightbox-state repair in fix_lightbox_metadata(). Screenshot assets
+		// have no real attachment for core to query, so this hands the
+		// lightbox the original `ps.w.org` image at its true size.
 		self::$lightbox_meta[ (int) $id ] = array(
 			'url'    => $src,
 			'width'  => ( is_array( $dimensions ) && ! empty( $dimensions[0] ) ) ? (int) $dimensions[0] : 'none',
@@ -411,11 +381,10 @@ class Screenshots {
 			$src
 		);
 		$figure .= sprintf(
-			'<img src="%1$s" alt="%2$s" class="wp-image-%3$d"%4$s%5$s loading="eager" fetchpriority="%6$s" decoding="async"/>',
+			'<img src="%1$s" alt="%2$s" class="wp-image-%3$d"%4$s loading="eager" fetchpriority="%5$s" decoding="async"/>',
 			$src,
 			esc_attr( $alt ),
 			$id,
-			$srcset,
 			$dim_attrs,
 			esc_attr( $priority )
 		);
@@ -449,11 +418,9 @@ class Screenshots {
 	 *
 	 * The empty `uploadedSrc` leaves the lightbox with no full-resolution
 	 * image to enlarge, and the `'none'` dimensions make core's view
-	 * script fall back to the *thumbnail's* natural size — which on
-	 * production is a Photon-shrunk srcset candidate (≤900px, often the
-	 * 300px tile). The enlarged view therefore renders tiny. On
-	 * environments without Photon the thumbnail is the full-resolution
-	 * original, which is why the bug is invisible on local / staging.
+	 * script fall back to the thumbnail's natural size. The rendered
+	 * thumbnail may be constrained by layout, but the enlarged view should
+	 * always use the original screenshot and its recorded dimensions.
 	 *
 	 * Core keys its lightbox metadata by a per-render `uniqid()` (exposed
 	 * on the figure's `data-wp-context`), not by the attachment id, so the
@@ -461,9 +428,8 @@ class Screenshots {
 	 * rendered markup and re-set the affected fields. `wp_interactivity_state()`
 	 * merges with `array_replace_recursive()` (later call wins), and this
 	 * filter runs at priority 20 — after core's priority-15 pass — so the
-	 * corrected values override the broken ones. `lightboxSrcset` is
-	 * cleared so the enlarged image loads the lossless original rather than
-	 * a capped Photon candidate.
+	 * corrected values override the broken ones. `lightboxSrcset` is cleared
+	 * so the enlarged image loads the original screenshot URL.
 	 *
 	 * @param string $block_content Rendered Image block markup.
 	 * @param array  $parsed_block  Parsed block, including `attrs['id']`.
@@ -552,54 +518,6 @@ class Screenshots {
 			. '<div class="plugin-screenshots__fade" aria-hidden="true"></div>'
 			. $button
 			. '</div>';
-	}
-
-	/**
-	 * Builds a Photon-powered `srcset` (and matching `sizes`) attribute string
-	 * for a `ps.w.org` screenshot URL. Returns an empty string when the source
-	 * URL is not on `ps.w.org`, so the original `src` is used unchanged.
-	 *
-	 * Plugin authors upload screenshots at full resolution but we render them
-	 * inside a 3-column grid, so the browser otherwise downloads the full
-	 * asset (often 300–800 KB) only to scale it down to a ~250 px tile.
-	 * Routing the URL through `i0.wp.com` (Photon) returns a re-encoded,
-	 * width-bound copy at ~10× smaller payload — see
-	 * https://developer.wordpress.com/docs/photon/ for the resize/optim
-	 * options. The grid thumbnail therefore loads a small Photon candidate;
-	 * the lightbox is pointed back at the full-resolution `ps.w.org` original
-	 * separately by {@see self::fix_lightbox_metadata()} so users still get
-	 * the lossless image when they enlarge a screenshot.
-	 *
-	 * @param string $src Original asset URL.
-	 * @return string Attribute fragment ready to interpolate into `<img>`,
-	 *                including the leading space, or empty string.
-	 */
-	protected static function photon_srcset( $src ) {
-		if ( ! preg_match( '#^https?://ps\.w\.org/#', $src ) ) {
-			return '';
-		}
-
-		// Photon (i0.wp.com) only runs on production and staging. In local
-		// or other environments the proxy may not be reachable, which would
-		// leave the gallery silently empty until the cold cache warmed up.
-		// Fall back to the unoptimised `ps.w.org` URL there.
-		$env = function_exists( 'wp_get_environment_type' ) ? wp_get_environment_type() : 'production';
-		if ( 'production' !== $env && 'staging' !== $env ) {
-			return '';
-		}
-
-		$photon_base = preg_replace( '#^https?://#', 'https://i0.wp.com/', $src );
-		$widths      = array( 300, 600, 900 );
-		$srcset      = array();
-
-		foreach ( $widths as $width ) {
-			$srcset[] = add_query_arg( 'w', $width, $photon_base ) . ' ' . $width . 'w';
-		}
-
-		return sprintf(
-			' srcset="%1$s" sizes="(max-width: 599px) 50vw, 33vw"',
-			esc_attr( implode( ', ', $srcset ) )
-		);
 	}
 
 	/**
